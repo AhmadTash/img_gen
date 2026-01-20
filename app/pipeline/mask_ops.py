@@ -47,117 +47,95 @@ def _smooth_noise_field(h: int, w: int, *, seed: Optional[int], scale: float) ->
 def generate_irregular_painted_mask(mask_u8: np.ndarray, *, messiness: float, seed: Optional[int]) -> np.ndarray:
     """Add hand-painted irregularity.
 
-    Techniques used (in combination):
-    - noise-driven edge threshold (like paint bleeding)
-    - random erosion/dilation cycles (like uneven brush pressure)
+    Current approach aims for a more "brushy / frayed" boundary than a generic
+    organic blob:
+    - keep a stable, filled-in base region so the paint reads as a single swatch
+    - generate a *boundary band* and only stylize that band
+    - add outward/inward chips (missing paint) + bristle streaks (directional dabs)
     """
 
     if mask_u8.dtype != np.uint8 or mask_u8.ndim != 2:
         raise ValueError("generate_irregular_painted_mask expects uint8 HxW mask")
 
     m = float(np.clip(messiness, 0.0, 1.0))
-    base = (mask_u8 > 0).astype(np.uint8) * 255
-
+    base = (mask_u8 > 0).astype(np.uint8)
     h, w = base.shape
-    field = _smooth_noise_field(h, w, seed=seed, scale=30.0 + 40.0 * m)
-
-    # Edge band: distance transform gives us where edges are, so we only roughen boundary.
-    inv = (base == 0).astype(np.uint8)
-    dist = cv2.distanceTransform(inv, distanceType=cv2.DIST_L2, maskSize=5).astype(np.float32)
-    dist = dist / (dist.max() + 1e-6)
-
-    # Stronger irregularity near the boundary.
-    edge_weight = np.clip(1.0 - dist * 3.0, 0.0, 1.0)
-
-    # Push/pull boundary by mixing in noise.
-    # Turn it up a bit so it reads more like a messed-up brush edge.
-    jitter = (field - 0.5) * (0.70 * m) * edge_weight
-
-    # Add a higher-frequency component so the edge isn't just "wobbly" but also a bit ragged.
-    # This mimics bristle marks / tiny paint chips at the boundary.
-    hf = _smooth_noise_field(h, w, seed=None if seed is None else int(seed) + 1337, scale=10.0 + 10.0 * m)
-    jitter += (hf - 0.5) * (0.25 * m) * edge_weight
-
-    # Convert to a soft mask then re-threshold.
-    soft = (base.astype(np.float32) / 255.0) + jitter
-    soft = np.clip(soft, 0.0, 1.0)
-
-    thr = 0.5
-    irregular = (soft > thr).astype(np.uint8) * 255
-
-    # Random morphological cycles (few steps so it stays blob-like).
     rng = np.random.default_rng(seed)
-    cycles = int(round(2 + 5 * m))
-    for _ in range(cycles):
-        ksz = int((3 + rng.integers(0, 6)) | 1)
-        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ksz, ksz))
-        if rng.random() < 0.5:
-            irregular = cv2.erode(irregular, k, iterations=1)
-        else:
-            irregular = cv2.dilate(irregular, k, iterations=1)
 
-    # A final light edge "chipping": erode then dilate with a tiny kernel, but only once.
-    # This makes the silhouette less smooth without destroying the blob.
-    chip_k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    irregular = cv2.erode(irregular, chip_k, iterations=1)
-    irregular = cv2.dilate(irregular, chip_k, iterations=1)
+    # --- 1) Stable blob --------------------------------------------------------
+    # Keep the region cohesive: slightly close + smooth corners.
+    close_k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+    blob = cv2.morphologyEx(base, cv2.MORPH_CLOSE, close_k, iterations=2)
+    blob = cv2.morphologyEx(blob, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)), iterations=1)
 
-    # Final close to avoid accidental pinholes.
-    irregular = cv2.morphologyEx(
-        irregular,
-        cv2.MORPH_CLOSE,
-        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)),
-        iterations=1,
-    )
+    # --- 2) Boundary band ------------------------------------------------------
+    # We only stylize this band so the interior remains solid and readable.
+    band_px = int(np.clip(6 + 26 * m, 4, 32))
+    dil = cv2.dilate(blob, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (band_px * 2 + 1, band_px * 2 + 1)), iterations=1)
+    er = cv2.erode(blob, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (band_px * 2 + 1, band_px * 2 + 1)), iterations=1)
+    band = ((dil > 0) & (er == 0)).astype(np.uint8)
 
-    # --- Brush-stroke edge pass -------------------------------------------------
-    # The noise/erode/dilate approach can look like "organic blob".
-    # To get *visible brush strokes along edges*, we stamp small, rotated
-    # elliptical "dabs" along the contour. This reads as bristles / uneven paint
-    # application without requiring actual stroke simulation.
+    # --- 3) Chips (missing paint) ---------------------------------------------
+    # Use thresholded noise + a couple of small morph ops to create paint "bites".
+    chips = np.zeros((h, w), dtype=np.uint8)
     if m > 0.0:
-        rng = np.random.default_rng(seed)
-        contours, _ = cv2.findContours((irregular > 0).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-        stroke_field = np.zeros_like(irregular)
+        lf = _smooth_noise_field(h, w, seed=seed, scale=18.0 + 30.0 * m)
+        hf = _smooth_noise_field(h, w, seed=None if seed is None else int(seed) + 7331, scale=6.0 + 10.0 * m)
+        field = (0.65 * lf + 0.35 * hf)
 
-        # Number of dabs scales with perimeter and messiness.
+        # More messiness => more chips.
+        thr = 0.86 - 0.22 * m
+        chips = ((field > thr) & (band > 0)).astype(np.uint8) * 255
+        chips = cv2.GaussianBlur(chips, (0, 0), sigmaX=0.8 + 0.8 * m, sigmaY=0.8 + 0.8 * m)
+        chips = (chips > 32).astype(np.uint8) * 255
+        chips = cv2.dilate(chips, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)), iterations=1)
+
+    # --- 4) Bristle streaks (directional dabs) --------------------------------
+    # Stamp thin ellipses along the contour to get "frayed" brisable edges.
+    streaks = np.zeros((h, w), dtype=np.uint8)
+    if m > 0.0:
+        contours, _ = cv2.findContours((blob > 0).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
         for cnt in contours:
-            if len(cnt) < 20:
+            if len(cnt) < 30:
                 continue
-
             perim = cv2.arcLength(cnt, closed=True)
-            n_dabs = int(np.clip((perim / 18.0) * (0.6 + 1.9 * m), 40, 2200))
-            idxs = rng.integers(0, len(cnt), size=n_dabs)
-
+            n = int(np.clip((perim / 24.0) * (0.4 + 1.8 * m), 30, 1500))
+            idxs = rng.integers(0, len(cnt), size=n)
             for idx in idxs:
                 x, y = cnt[idx, 0]
 
-                # Dab sizes: a bit wider/taller for higher messiness.
-                major = float(rng.uniform(6.0, 18.0) * (0.6 + 1.2 * m))
-                minor = float(rng.uniform(2.0, 7.0) * (0.6 + 1.2 * m))
-                angle = float(rng.uniform(0.0, 180.0))
+                # Tangent direction from neighbors.
+                p0 = cnt[(idx - 3) % len(cnt), 0].astype(np.float32)
+                p1 = cnt[(idx + 3) % len(cnt), 0].astype(np.float32)
+                v = p1 - p0
+                ang = float(np.degrees(np.arctan2(v[1], v[0])))
 
-                # Offset slightly outward/inward so strokes sit on the boundary.
-                ox = int(rng.normal(0.0, 1.0) * (0.8 + 1.8 * m))
-                oy = int(rng.normal(0.0, 1.0) * (0.8 + 1.8 * m))
+                # Long thin stroke oriented with tangent.
+                major = float(rng.uniform(8.0, 26.0) * (0.5 + 1.1 * m))
+                minor = float(rng.uniform(1.5, 4.5) * (0.6 + 1.0 * m))
 
+                # Push slightly outwards/inwards by random small amount.
+                ox = int(rng.normal(0.0, 1.2) * (0.8 + 1.8 * m))
+                oy = int(rng.normal(0.0, 1.2) * (0.8 + 1.8 * m))
                 center = (int(x + ox), int(y + oy))
                 axes = (max(1, int(major / 2.0)), max(1, int(minor / 2.0)))
-                cv2.ellipse(stroke_field, center, axes, angle, 0, 360, 255, thickness=-1)
+                cv2.ellipse(streaks, center, axes, ang, 0, 360, 255, thickness=-1)
 
-        # Feather slightly so strokes don't look like crisp stamps.
-        stroke_field = cv2.GaussianBlur(stroke_field, (0, 0), sigmaX=0.7 + 0.8 * m, sigmaY=0.7 + 0.8 * m)
-        stroke_field = (stroke_field > 18).astype(np.uint8) * 255
+        # Keep streaks mainly in the band so it doesn't inflate the whole blob.
+        streaks = cv2.bitwise_and(streaks, band * 255)
+        streaks = cv2.GaussianBlur(streaks, (0, 0), sigmaX=0.7 + 0.9 * m, sigmaY=0.7 + 0.9 * m)
+        streaks = (streaks > 28).astype(np.uint8) * 255
 
-        # Mix strokes with the existing irregular mask.
-        # Union adds outward bristle strokes; intersection via erode balances it.
-        irregular = cv2.bitwise_or(irregular, stroke_field)
-        if m > 0.35:
-            irregular = cv2.morphologyEx(
-                irregular,
-                cv2.MORPH_CLOSE,
-                cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)),
-                iterations=1,
-            )
+    # --- 5) Combine ------------------------------------------------------------
+    out = (blob * 255).astype(np.uint8)
+    if int(streaks.sum()) > 0:
+        out = cv2.bitwise_or(out, streaks)
+    if int(chips.sum()) > 0:
+        # Subtract chips from the band only (keeps interior filled).
+        out_band = cv2.bitwise_and(out, (band * 255))
+        out_band = cv2.subtract(out_band, chips)
+        out = cv2.bitwise_or(cv2.bitwise_and(out, (1 - band) * 255), out_band)
 
-    return (irregular > 0).astype(np.uint8) * 255
+    # Final close to avoid accidental tiny pinholes.
+    out = cv2.morphologyEx(out, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)), iterations=1)
+    return (out > 0).astype(np.uint8) * 255

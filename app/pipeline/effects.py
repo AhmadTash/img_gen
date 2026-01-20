@@ -11,6 +11,8 @@ def apply_lofi_effects(
     *,
     seed: Optional[int],
     grain_mask: Optional[np.ndarray] = None,
+    blur_sigma: float = 1.2,
+    blur_mix: float = 0.30,
 ) -> np.ndarray:
     """Add lo-fi degradation: blur + mild contrast reduction + fine grain.
 
@@ -27,8 +29,13 @@ def apply_lofi_effects(
     # Mild contrast reduction: pull towards mid-tones.
     x = 128.0 + (x - 128.0) * 0.92
 
-    # Slight blur to soften edges and integrate paint/text.
-    x = cv2.GaussianBlur(x, (0, 0), sigmaX=0.6, sigmaY=0.6)
+    # Layer-based blur: duplicate the image, blur only one layer, then blend.
+    # This feels more "optical" (cheap lens / scanning) than blurring the whole image.
+    s = float(max(0.0, blur_sigma))
+    mix = float(np.clip(blur_mix, 0.0, 1.0))
+    if s > 0.0 and mix > 0.0:
+        blurred = cv2.GaussianBlur(x, (0, 0), sigmaX=s, sigmaY=s)
+        x = x * (1.0 - mix) + blurred * mix
 
     # Fine film grain: keep it high-frequency so it reads as tiny dots, not blobs.
     # We avoid blurring grain (or blur it extremely lightly) to keep dots small.

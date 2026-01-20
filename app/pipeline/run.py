@@ -25,9 +25,15 @@ from app.utils.image import (
 
 @dataclass(frozen=True)
 class GenerateParams:
-    paint_thickness: int = 15
-    messiness: float = 0.5
-    text_wobble: float = 0.5
+    paint_thickness: int = 10
+    messiness: float = 0.01
+    text_wobble: float = 0.1
+    blur_sigma: float = 1.5
+    blur_mix: float = 0.5
+    shadow_opacity: float = 0.18
+    shadow_sigma: float = 6.0
+    shadow_dx: int = 1
+    shadow_dy: int = 1
     seed: Optional[int] = None
 
 
@@ -35,9 +41,15 @@ def generate_image(
     *,
     raw_image_bytes: bytes,
     text: str,
-    paint_thickness: int = 15,
-    messiness: float = 0.5,
-    text_wobble: float = 0.5,
+    paint_thickness: int = 10,
+    messiness: float = 0.01,
+    text_wobble: float = 0.1,
+    blur_sigma: float = 1.5,
+    blur_mix: float = 0.5,
+    shadow_opacity: float = 0.18,
+    shadow_sigma: float = 6.0,
+    shadow_dx: int = 1,
+    shadow_dy: int = 1,
     seed: Optional[int] = None,
 ) -> bytes:
     """End-to-end pipeline.
@@ -55,6 +67,12 @@ def generate_image(
         paint_thickness=paint_thickness,
         messiness=float(messiness),
         text_wobble=float(text_wobble),
+    blur_sigma=float(blur_sigma),
+    blur_mix=float(blur_mix),
+    shadow_opacity=float(shadow_opacity),
+    shadow_sigma=float(shadow_sigma),
+    shadow_dx=int(shadow_dx),
+    shadow_dy=int(shadow_dy),
         seed=seed,
     )
 
@@ -81,7 +99,14 @@ def generate_image(
 
     # Optional depth: a subtle shadow around the paint edges.
     # This helps the white patch feel like it's sitting *on top* of the photo.
-    shadow_rgb, shadow_alpha = create_paint_shadow(irregular, seed=params.seed)
+    shadow_rgb, shadow_alpha = create_paint_shadow(
+        irregular,
+        seed=params.seed,
+        opacity=params.shadow_opacity,
+        sigma=params.shadow_sigma,
+        dx=params.shadow_dx,
+        dy=params.shadow_dy,
+    )
 
     # f) Composite Paint Over Original
     comp = composite_over(rgb, shadow_rgb, shadow_alpha)
@@ -99,7 +124,13 @@ def generate_image(
     # h) Lo-Fi Degradation
     # Apply fine grain only to the non-painted area so the white patch stays clean.
     outside_paint = (255 - irregular).astype(np.uint8)
-    comp = apply_lofi_effects(comp, seed=params.seed, grain_mask=outside_paint)
+    comp = apply_lofi_effects(
+        comp,
+        seed=params.seed,
+        grain_mask=outside_paint,
+        blur_sigma=params.blur_sigma,
+        blur_mix=params.blur_mix,
+    )
 
     # i) Export PNG
     out = Image.fromarray(comp, mode="RGB")
@@ -122,7 +153,15 @@ def composite_over(base_rgb: np.ndarray, overlay_rgb: np.ndarray, overlay_alpha:
     return out.astype(np.uint8)
 
 
-def create_paint_shadow(mask_u8: np.ndarray, *, seed: Optional[int]) -> tuple[np.ndarray, np.ndarray]:
+def create_paint_shadow(
+    mask_u8: np.ndarray,
+    *,
+    seed: Optional[int],
+    opacity: float = 0.18,
+    sigma: float = 6.0,
+    dx: int = 1,
+    dy: int = 1,
+) -> tuple[np.ndarray, np.ndarray]:
     """Create a soft shadow around the painted region.
 
     Implementation:
@@ -142,18 +181,18 @@ def create_paint_shadow(mask_u8: np.ndarray, *, seed: Optional[int]) -> tuple[np
     edge = cv2.subtract(m, er).astype(np.float32)  # 0/1
 
     # Convert to a soft shadow alpha.
-    shadow = cv2.GaussianBlur(edge, (0, 0), sigmaX=6.0, sigmaY=6.0)
+    shadow = cv2.GaussianBlur(edge, (0, 0), sigmaX=float(sigma), sigmaY=float(sigma))
     shadow = shadow / (shadow.max() + 1e-6)
 
-    # Shadow opacity (subtle): max around ~18%.
-    alpha = (shadow * 46.0).clip(0.0, 46.0).astype(np.uint8)
+    # Shadow opacity (subtle): default max around ~18%.
+    op = float(np.clip(opacity, 0.0, 1.0))
+    alpha = (shadow * (op * 255.0)).clip(0.0, 255.0).astype(np.uint8)
 
-    # Slight offset for realism.
-    rng = np.random.default_rng(seed)
-    dx = int(rng.integers(-1, 3))
-    dy = int(rng.integers(0, 3))
-    if dx != 0 or dy != 0:
-        M = np.float32([[1, 0, dx], [0, 1, dy]])
+    # Offset for realism.
+    dx_i = int(dx)
+    dy_i = int(dy)
+    if dx_i != 0 or dy_i != 0:
+        M = np.float32([[1, 0, dx_i], [0, 1, dy_i]])
         alpha = cv2.warpAffine(alpha, M, (w, h), flags=cv2.INTER_NEAREST, borderValue=0)
 
     shadow_rgb = np.zeros((h, w, 3), dtype=np.uint8)  # black shadow

@@ -33,9 +33,12 @@ uvicorn app.main:app --reload --port 8000
 curl -X POST "http://127.0.0.1:8000/generate" \
   -F "image=@/path/to/photo.jpg" \
   -F "text=I miss you" \
-  -F "paint_thickness=18" \
-  -F "messiness=0.65" \
-  -F "text_wobble=0.6" \
+  -F "paint_thickness=10" \
+  -F "messiness=0.01" \
+  -F "text_wobble=0.1" \
+  -F "seed=1500" \
+  -F "blur_sigma=1.5" \
+  -F "blur_mix=0.5" \
   --output out.png
 ```
 
