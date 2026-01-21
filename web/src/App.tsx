@@ -11,6 +11,7 @@ type GenerateParams = {
   shadow_sigma: number;
   shadow_dx: number;
   shadow_dy: number;
+  edge_softness: number;
 };
 
 const DEFAULTS: GenerateParams = {
@@ -24,6 +25,7 @@ const DEFAULTS: GenerateParams = {
   shadow_sigma: 6,
   shadow_dx: 1,
   shadow_dy: 1,
+  edge_softness: 3,
 };
 
 export default function App() {
@@ -69,6 +71,7 @@ export default function App() {
       fd.append("shadow_sigma", String(params.shadow_sigma));
       fd.append("shadow_dx", String(params.shadow_dx));
       fd.append("shadow_dy", String(params.shadow_dy));
+      fd.append("edge_softness", String(params.edge_softness));
 
       const res = await fetch("/generate", {
         method: "POST",
@@ -224,6 +227,17 @@ export default function App() {
                 max={50}
                 step={1}
                 onChange={(v) => setParams((p) => ({ ...p, shadow_dy: v }))}
+              />
+              <hr className="sep" />
+              <NumberField
+                label="edge_softness"
+                value={params.edge_softness}
+                min={0}
+                max={10}
+                step={0.5}
+                onChange={(v) =>
+                  setParams((p) => ({ ...p, edge_softness: v }))
+                }
               />
             </div>
           </details>

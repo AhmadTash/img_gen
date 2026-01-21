@@ -6,12 +6,18 @@ import cv2
 import numpy as np
 
 
-def expand_and_cleanup_mask(mask_u8: np.ndarray, *, paint_thickness: int) -> np.ndarray:
+def expand_and_cleanup_mask(
+    mask_u8: np.ndarray,
+    *,
+    paint_thickness: int,
+    edge_softness: float = 3.0,
+) -> np.ndarray:
     """Dilate mask and close holes.
 
     Artistic intent:
     - dilation creates the "painted blob" that extends past the silhouette
     - closing fills small gaps so the paint reads as a single swatch
+    - edge smoothing creates anti-aliased, non-pixelated boundaries
     """
 
     if mask_u8.dtype != np.uint8 or mask_u8.ndim != 2:
@@ -24,7 +30,18 @@ def expand_and_cleanup_mask(mask_u8: np.ndarray, *, paint_thickness: int) -> np.
     close_k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (max(7, px) | 1, max(7, px) | 1))
     closed = cv2.morphologyEx(dilated, cv2.MORPH_CLOSE, close_k, iterations=2)
 
-    return (closed > 0).astype(np.uint8) * 255
+    result = (closed > 0).astype(np.uint8) * 255
+
+    # Apply Gaussian smoothing to create anti-aliased edges
+    # Then threshold back to binary (but the blur softens pixel edges)
+    edge_softness = float(np.clip(edge_softness, 0.0, 10.0))
+    if edge_softness > 0:
+        blur_sigma = max(0.5, edge_softness * 0.4)
+        smoothed = cv2.GaussianBlur(result.astype(np.float32), (0, 0), sigmaX=blur_sigma, sigmaY=blur_sigma)
+        # Re-threshold with slight buffer to keep the mask mostly intact
+        result = (smoothed > 127).astype(np.uint8) * 255
+
+    return result
 
 
 def _smooth_noise_field(h: int, w: int, *, seed: Optional[int], scale: float) -> np.ndarray:
@@ -44,7 +61,13 @@ def _smooth_noise_field(h: int, w: int, *, seed: Optional[int], scale: float) ->
     return field
 
 
-def generate_irregular_painted_mask(mask_u8: np.ndarray, *, messiness: float, seed: Optional[int]) -> np.ndarray:
+def generate_irregular_painted_mask(
+    mask_u8: np.ndarray,
+    *,
+    messiness: float,
+    seed: Optional[int],
+    edge_softness: float = 3.0,
+) -> np.ndarray:
     """Add hand-painted irregularity.
 
     Current approach aims for a more "brushy / frayed" boundary than a generic
@@ -138,4 +161,12 @@ def generate_irregular_painted_mask(mask_u8: np.ndarray, *, messiness: float, se
 
     # Final close to avoid accidental tiny pinholes.
     out = cv2.morphologyEx(out, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)), iterations=1)
-    return (out > 0).astype(np.uint8) * 255
+
+    # Apply final edge smoothing for anti-aliased boundaries
+    edge_softness = float(np.clip(edge_softness, 0.0, 10.0))
+    if edge_softness > 0:
+        blur_sigma = max(0.5, edge_softness * 0.35)
+        smoothed = cv2.GaussianBlur(out.astype(np.float32), (0, 0), sigmaX=blur_sigma, sigmaY=blur_sigma)
+        out = (smoothed > 127).astype(np.uint8) * 255
+
+    return out

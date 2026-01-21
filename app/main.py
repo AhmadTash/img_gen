@@ -15,10 +15,10 @@ app = FastAPI(title="Lo-fi painted-out person generator")
 # In production, tighten origins to your deployed frontend URL(s).
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"] ,
-    allow_headers=["*"] ,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -40,6 +40,7 @@ async def generate(
     shadow_sigma: float = Form(6.0),
     shadow_dx: int = Form(1),
     shadow_dy: int = Form(1),
+    edge_softness: float = Form(3.0),
     seed: Optional[int] = Form(1500),
 ) -> Response:
     if paint_thickness < 1 or paint_thickness > 200:
@@ -60,6 +61,8 @@ async def generate(
         raise HTTPException(status_code=400, detail="shadow_dx must be in [-50, 50]")
     if shadow_dy < -50 or shadow_dy > 50:
         raise HTTPException(status_code=400, detail="shadow_dy must be in [-50, 50]")
+    if not (0.0 <= edge_softness <= 10.0):
+        raise HTTPException(status_code=400, detail="edge_softness must be in [0, 10]")
     if text is None:
         raise HTTPException(status_code=400, detail="text is required")
 
@@ -80,6 +83,7 @@ async def generate(
             shadow_sigma=shadow_sigma,
             shadow_dx=shadow_dx,
             shadow_dy=shadow_dy,
+            edge_softness=edge_softness,
             seed=seed,
         )
     except ValueError as e:

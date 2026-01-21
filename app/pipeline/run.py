@@ -34,6 +34,7 @@ class GenerateParams:
     shadow_sigma: float = 6.0
     shadow_dx: int = 1
     shadow_dy: int = 1
+    edge_softness: float = 3.0
     seed: Optional[int] = None
 
 
@@ -50,6 +51,7 @@ def generate_image(
     shadow_sigma: float = 6.0,
     shadow_dx: int = 1,
     shadow_dy: int = 1,
+    edge_softness: float = 3.0,
     seed: Optional[int] = None,
 ) -> bytes:
     """End-to-end pipeline.
@@ -67,12 +69,13 @@ def generate_image(
         paint_thickness=paint_thickness,
         messiness=float(messiness),
         text_wobble=float(text_wobble),
-    blur_sigma=float(blur_sigma),
-    blur_mix=float(blur_mix),
-    shadow_opacity=float(shadow_opacity),
-    shadow_sigma=float(shadow_sigma),
-    shadow_dx=int(shadow_dx),
-    shadow_dy=int(shadow_dy),
+        blur_sigma=float(blur_sigma),
+        blur_mix=float(blur_mix),
+        shadow_opacity=float(shadow_opacity),
+        shadow_sigma=float(shadow_sigma),
+        shadow_dx=int(shadow_dx),
+        shadow_dy=int(shadow_dy),
+        edge_softness=float(edge_softness),
         seed=seed,
     )
 
@@ -85,16 +88,26 @@ def generate_image(
     person_mask = segment_person_mask(rgb, seed=params.seed)
 
     # c) Mask Expansion & Cleanup
-    expanded = expand_and_cleanup_mask(person_mask, paint_thickness=params.paint_thickness)
+    expanded = expand_and_cleanup_mask(
+        person_mask,
+        paint_thickness=params.paint_thickness,
+        edge_softness=params.edge_softness,
+    )
 
     # d) Irregular Painted Mask Generation
-    irregular = generate_irregular_painted_mask(expanded, messiness=params.messiness, seed=params.seed)
+    irregular = generate_irregular_painted_mask(
+        expanded,
+        messiness=params.messiness,
+        seed=params.seed,
+        edge_softness=params.edge_softness,
+    )
 
     # e) Paint Layer Creation
     paint_rgb, paint_alpha = create_paint_layer(
         shape=rgb.shape[:2],
         mask=irregular,
         seed=params.seed,
+        edge_softness=params.edge_softness,
     )
 
     # Optional depth: a subtle shadow around the paint edges.
