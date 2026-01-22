@@ -9,7 +9,7 @@
 # IMPORTANT: Update the VITE_API_URL below with your actual Heroku app URL
 # You can also set this in Netlify's dashboard under Site settings > Environment variables
 [build.environment]
-  VITE_API_URL = "https://your-heroku-app.herokuapp.com"
+  VITE_API_URL = "https://img-gen-f993a3d38d56.herokuapp.com"
   NODE_VERSION = "20"
   # Disable Python detection - this is a Node.js only project
   PYTHON_VERSION = ""
