@@ -16,7 +16,7 @@ type GenerateParams = {
 
 const DEFAULTS: GenerateParams = {
   paint_thickness: 10,
-  messiness: 0.01,
+  messiness: 0.0,
   text_wobble: 0.1,
   seed: 1500,
   blur_sigma: 1.5,
@@ -249,12 +249,42 @@ export default function App() {
             <button
               className="button ghost"
               type="button"
-              onClick={() => {
-                setParams(DEFAULTS);
-              }}
+              onClick={() => setParams(DEFAULTS)}
+              disabled={isLoading}
             >
               Reset defaults
             </button>
+            {/* <button
+              className="button ghost"
+              type="button"
+              disabled={!file || isLoading}
+              onClick={async () => {
+                if (!file) return;
+                setIsLoading(true);
+                try {
+                  const fd = new FormData();
+                  fd.append("image", file);
+                  const res = await fetch("/suggest-params", {
+                    method: "POST",
+                    body: fd,
+                  });
+                  if (!res.ok) throw new Error("Failed to get suggestions");
+                  const json = await res.json();
+                  if (json.status === "ok" && json.params) {
+                    setParams(p => ({ ...p, ...json.params }));
+                  } else if (json.status === "not_ready") {
+                     alert("Model not trained yet. Please learn from some examples first!");
+                  }
+                } catch (e) {
+                  alert("Error getting suggestions");
+                  console.error(e);
+                } finally {
+                  setIsLoading(false);
+                }
+              }}
+            >
+              🪄 Auto-Suggest
+            </button> */}
           </div>
 
           {error && <div className="error">{error}</div>}
@@ -282,11 +312,20 @@ export default function App() {
                   <div className="muted">Generate to see output</div>
                 )}
               </div>
-              {resultUrl && (
-                <a className="download" href={resultUrl} download="out.png">
-                  Download PNG
-                </a>
-              )}
+              <div className="resultActions">
+                {resultUrl && (
+                  <a className="download" href={resultUrl} download="out.png">
+                    Download PNG
+                  </a>
+                )}
+                {/* {resultUrl && (
+                  <FeedbackButton
+                    file={file}
+                    params={params}
+                    onSuccess={() => alert("Saved as learning example!")}
+                  />
+                )} */}
+              </div>
             </div>
           </div>
         </div>
@@ -296,6 +335,65 @@ export default function App() {
         Keep <code>seed</code> the same for deterministic output. GAME ON!
       </footer>
     </div>
+  );
+}
+
+function FeedbackButton({
+  file,
+  params,
+  onSuccess,
+}: {
+  file: File | null;
+  params: GenerateParams;
+  onSuccess: () => void;
+}) {
+  const [loading, setLoading] = useState(false);
+
+  async function onClick() {
+    if (!file) return;
+    if (!confirm("Save these parameters as a good example for the AI to learn?")) return;
+    
+    setLoading(true);
+    try {
+      const fd = new FormData();
+      fd.append("image", file);
+      // Map params
+      fd.append("paint_thickness", String(params.paint_thickness));
+      fd.append("messiness", String(params.messiness));
+      fd.append("text_wobble", String(params.text_wobble));
+      fd.append("blur_sigma", String(params.blur_sigma));
+      fd.append("blur_mix", String(params.blur_mix));
+      fd.append("shadow_opacity", String(params.shadow_opacity));
+      fd.append("shadow_sigma", String(params.shadow_sigma));
+      fd.append("shadow_dx", String(params.shadow_dx));
+      fd.append("shadow_dy", String(params.shadow_dy));
+      fd.append("edge_softness", String(params.edge_softness));
+
+      const res = await fetch("/log-feedback", {
+        method: "POST",
+        body: fd,
+      });
+
+      if (!res.ok) throw new Error("Failed to save example");
+      onSuccess();
+    } catch (e) {
+      alert("Error saving example");
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      className="button small secondary"
+      onClick={onClick}
+      disabled={loading}
+      style={{ marginTop: "0.5rem" }}
+    >
+      {loading ? "Saving..." : "Learn from this"}
+    </button>
   );
 }
 

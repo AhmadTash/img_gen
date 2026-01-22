@@ -4,10 +4,13 @@ import io
 from typing import Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.pipeline.run import generate_image
+from ml.features import extract_features
+from ml.dataset import log_sample
+from ml.predict import predict_params
 
 app = FastAPI(title="Lo-fi painted-out person generator")
 
@@ -32,7 +35,7 @@ async def generate(
     image: UploadFile = File(...),
     text: str = Form(...),
     paint_thickness: int = Form(10),
-    messiness: float = Form(0.01),
+    messiness: float = Form(0.0),
     text_wobble: float = Form(0.1),
     blur_sigma: float = Form(1.5),
     blur_mix: float = Form(0.5),
@@ -70,6 +73,9 @@ async def generate(
     if not raw:
         raise HTTPException(status_code=400, detail="empty image")
 
+    # NOTE: Automatic ML logging removed. 
+    # User now explicitly calls /log-feedback to save successful examples.
+
     try:
         out_png = generate_image(
             raw_image_bytes=raw,
@@ -90,3 +96,70 @@ async def generate(
         raise HTTPException(status_code=400, detail=str(e))
 
     return Response(content=out_png, media_type="image/png")
+
+
+@app.post("/log-feedback")
+async def log_feedback(
+    image: UploadFile = File(...),
+    paint_thickness: int = Form(...),
+    messiness: float = Form(...),
+    text_wobble: float = Form(...),
+    blur_sigma: float = Form(...),
+    blur_mix: float = Form(...),
+    shadow_opacity: float = Form(...),
+    shadow_sigma: float = Form(...),
+    shadow_dx: int = Form(...),
+    shadow_dy: int = Form(...),
+    edge_softness: float = Form(...),
+) -> JSONResponse:
+    """
+    Manually save this example (Image + Params) as a positive training sample.
+    """
+    raw = await image.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="empty image")
+    
+    try:
+        feats = extract_features(raw)
+        params_dict = {
+            "paint_thickness": paint_thickness,
+            "messiness": messiness,
+            "text_wobble": text_wobble,
+            "blur_sigma": blur_sigma,
+            "blur_mix": blur_mix,
+            "shadow_opacity": shadow_opacity,
+            "shadow_sigma": shadow_sigma,
+            "shadow_dx": shadow_dx,
+            "shadow_dy": shadow_dy,
+            "edge_softness": edge_softness,
+        }
+        log_sample(feats, params_dict)
+        return JSONResponse(content={"status": "ok", "message": "Example saved for learning."})
+    except Exception as e:
+        print(f"Manual Logging failed: {e}")
+        return JSONResponse(content={"status": "error", "detail": str(e)}, status_code=500)
+
+
+@app.post("/suggest-params")
+async def suggest_params(
+    image: UploadFile = File(...),
+) -> JSONResponse:
+    """
+    Predict aesthetic parameters based on the image content.
+    Returns JSON with suggested keys.
+    """
+    raw = await image.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="empty image")
+
+    try:
+        feats = extract_features(raw)
+        params = predict_params(feats)
+        if params is None:
+             # If no model is trained yet, return empty or default behavior
+             return JSONResponse(content={"status": "not_ready", "params": {}})
+        return JSONResponse(content={"status": "ok", "params": params})
+    except Exception as e:
+        # Don't crash client if ML fails
+        print(f"Suggestion failed: {e}")
+        return JSONResponse(content={"status": "error", "detail": str(e)}, status_code=500)
