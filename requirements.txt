@@ -4,8 +4,9 @@ python-multipart==0.0.12
 pillow==10.4.0
 opencv-python==4.10.0.84
 numpy==2.0.2
-torch==2.5.1
-torchvision==0.20.1
-scikit-learn
-pandas
-joblib
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.5.1+cpu
+torchvision==0.20.1+cpu
+scikit-learn==1.5.2
+pandas==2.2.3
+joblib==1.4.2
