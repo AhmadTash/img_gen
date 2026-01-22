@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.git/
+web/
+node_modules/
+tests/
+*.md
+.gitignore
+.venv
+venv/
+*.log
+.DS_Store
