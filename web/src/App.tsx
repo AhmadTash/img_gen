@@ -36,6 +36,9 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
 
+  // Use environment variable for API URL, fallback to empty string for relative paths in dev
+  const API_URL = import.meta.env.VITE_API_URL || "";
+
   const canSubmit = file && text.trim().length > 0 && !isLoading;
 
   const previewUrl = useMemo(() => {
@@ -73,7 +76,7 @@ export default function App() {
       fd.append("shadow_dy", String(params.shadow_dy));
       fd.append("edge_softness", String(params.edge_softness));
 
-      const res = await fetch("/generate", {
+      const res = await fetch(`${API_URL}/generate`, {
         method: "POST",
         body: fd,
       });
@@ -264,7 +267,7 @@ export default function App() {
                 try {
                   const fd = new FormData();
                   fd.append("image", file);
-                  const res = await fetch("/suggest-params", {
+                  const res = await fetch(`${API_URL}/suggest-params`, {
                     method: "POST",
                     body: fd,
                   });
@@ -348,6 +351,7 @@ function FeedbackButton({
   onSuccess: () => void;
 }) {
   const [loading, setLoading] = useState(false);
+  const API_URL = import.meta.env.VITE_API_URL || "";
 
   async function onClick() {
     if (!file) return;
@@ -369,7 +373,7 @@ function FeedbackButton({
       fd.append("shadow_dy", String(params.shadow_dy));
       fd.append("edge_softness", String(params.edge_softness));
 
-      const res = await fetch("/log-feedback", {
+      const res = await fetch(`${API_URL}/log-feedback`, {
         method: "POST",
         body: fd,
       });

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import os
 from typing import Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -14,11 +15,18 @@ from ml.predict import predict_params
 
 app = FastAPI(title="Lo-fi painted-out person generator")
 
-# Basic CORS for local dev UI.
-# In production, tighten origins to your deployed frontend URL(s).
+# CORS configuration: allow specific origins from environment variable, or allow all for dev
+# Set ALLOWED_ORIGINS environment variable as comma-separated list: "https://app1.com,https://app2.com"
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "")
+if allowed_origins_env:
+    allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",")]
+else:
+    # Default: allow all origins (for local dev and flexibility)
+    allowed_origins = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

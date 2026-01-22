@@ -1,0 +1,9 @@
+[build]
+  base = "web"
+  publish = "web/dist"
+  command = "npm install && npm run build"
+
+# IMPORTANT: Update the VITE_API_URL below with your actual Heroku app URL
+# You can also set this in Netlify's dashboard under Site settings > Environment variables
+[build.environment]
+  VITE_API_URL = "https://your-heroku-app.herokuapp.com"
