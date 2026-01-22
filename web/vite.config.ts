@@ -3,7 +3,8 @@ import react from "@vitejs/plugin-react";
 
 // Dev proxy so the React app can call the FastAPI server without CORS hassle.
 // In production, VITE_API_URL will be used directly in the frontend code.
-const apiUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+// Note: In vite.config.ts, we use process.env (Node.js context), not import.meta.env
+const apiUrl = process.env.VITE_API_URL || "http://127.0.0.1:8000";
 
 export default defineConfig({
   plugins: [react()],
